@@ -1,40 +1,63 @@
-import aiohttp
-import logging
 import re
-from config import VK_TOKEN
+from aiogram.types import Message
+import logging
 
-url_pattern = re.compile(r"https?://[^\s]+")
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-def is_valid_url(text: str) -> bool:
-    return bool(url_pattern.match(text))
-
-def escape_md(text: str) -> str:
-    special_chars = r'_*[]()~`>#+-=|{}.!'
-    for ch in special_chars:
-        text = text.replace(ch, '\\' + ch)
-    return text
-
-async def shorten_vk_link(link: str) -> str | None:
-    url = "https://vk.cc/shorten"
-    headers = {"Authorization": f"Bearer {VK_TOKEN}"}
-    params = {"url": link}
-
+async def safe_delete(message: Message):
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, params=params, headers=headers) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return data.get("short_url")
-                else:
-                    logging.error(f"VK shorten error: status {response.status}")
-    except aiohttp.ClientError as e:
-        logging.error(f"VK shorten request failed: {e}")
-    return None
+        await message.delete()
+    except:
+        pass
 
-async def send_long_message(message, text: str, max_length=4096):
-    if len(text) <= max_length:
-        await message.answer(text, disable_web_page_preview=True)
-        return
-    parts = [text[i:i + max_length] for i in range(0, len(text), max_length)]
-    for part in parts:
-        await message.answer(part, disable_web_page_preview=True)
+def is_valid_url(url: str) -> bool:
+    url = url.strip()
+    if not url:
+        return False
+    pattern = re.compile(
+        r'^https?://'  # http:// или https://
+        r'(?:(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}|'  # домен
+        r'localhost|'  # localhost
+        r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'  # IP
+        r'(?::\d+)?(?:/[-a-zA-Z0-9@:%_\+.~#?&//=]*)?$'
+    )
+    return bool(pattern.match(url))
+
+def format_link_stats(stats: dict, short_url: str) -> str:
+    if not stats or "views" not in stats:
+        return f"📉 Пока нет статистики по {short_url}.\nОна появится, как только начнутся переходы."
+    
+    response = f"📊 Статистика по {short_url}\n"
+    response += f"👁 Переходов: {stats.get('views', 0)}\n\n"
+
+    if "sex_age" in stats:
+        sex_age = {}
+        for item in stats["sex_age"]:
+            age_range = item["age_range"]
+            sex = "Мужчины" if item["sex"] == 1 else "Женщины"
+            views = item["views"]
+            sex_age.setdefault(age_range, {}).setdefault(sex, 0)
+            sex_age[age_range][sex] += views
+        response += "👤 Пол / возраст:\n"
+        for age, sexes in sex_age.items():
+            men = sexes.get("Мужчины", 0)
+            women = sexes.get("Женщины", 0)
+            total = men + women
+            if total > 0:
+                response += f"— {age}: Мужчины {men/total*100:.0f}%, Женщины {women/total*100:.0f}%\n"
+
+    if "countries" in stats:
+        response += "\n🌍 География (страны):\n"
+        for country in stats["countries"]:
+            country_name = "Неизвестно"  # Замени на реальный парсер названий, если нужен
+            views = country["views"]
+            response += f"— {country_name}: {views} ({views/stats['views']*100:.1f}%)\n"
+        if "cities" in stats:
+            response += "Города:\n"
+            for city in stats["cities"]:
+                city_name = "Неизвестно"  # Замени на реальный парсер
+                views = city["views"]
+                response += f"  — {city_name}: {views} ({views/stats['views']*100:.1f}%)\n"
+
+    return response
