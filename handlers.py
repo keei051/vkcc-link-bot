@@ -1,8 +1,7 @@
 from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.filters import CommandStart, Command
-from utils import shorten_vk_link, send_long_message, is_valid_url
-from aiogram.utils.markdown_v2 import escape_md
+from utils import shorten_vk_link, send_long_message, is_valid_url, escape_md
 
 router = Router()
 
