@@ -1,27 +1,21 @@
 import logging
 import os
-import json
-import aiohttp
 import asyncio
-import re
-from aiogram import Bot, Dispatcher, types, F
+from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message
 from aiogram.enums.parse_mode import ParseMode
 from aiogram.filters import CommandStart, Command
-from aiogram.utils.markdown import escape_md
-from asyncio import Semaphore
 from dotenv import load_dotenv
 
 from database import Database
-from keyboards import main_menu, link_inline_keyboard
+from keyboards import main_menu
 from config import MAX_LINKS_PER_BATCH, BOT_TOKEN, VK_TOKEN
-from utils import shorten_vk_link, send_long_message, is_valid_url
+from utils import shorten_vk_link, send_long_message, is_valid_url, escape_md
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 load_dotenv()
 
-# Проверка токенов
 if not BOT_TOKEN or not VK_TOKEN:
     logging.error("BOT_TOKEN or VK_TOKEN not found in .env")
     exit(1)
@@ -32,11 +26,16 @@ db = Database()
 
 @dp.message(CommandStart())
 async def start_cmd(message: Message):
-    await message.answer("👋 Привет! Отправь одну или сразу несколько ссылок (до 50). Я сокращу их и сохраню.", reply_markup=main_menu)
+    await message.answer(
+        "👋 Привет! Отправь одну или сразу несколько ссылок (до 50). Я сокращу их и сохраню.",
+        reply_markup=main_menu
+    )
 
 @dp.message(Command("help"))
 async def help_cmd(message: Message):
-    await message.answer("📌 Отправь до 50 ссылок (каждая с новой строки), и я верну сокращения.")
+    await message.answer(
+        "📌 Отправь до 50 ссылок (каждая с новой строки), и я верну сокращения."
+    )
 
 @dp.message(F.text)
 async def handle_text(message: Message):
@@ -60,12 +59,12 @@ async def handle_text(message: Message):
             short = await shorten_vk_link(line)
             if short:
                 db.add_link(user_id, line, short)
-                results.append(f"✅ [{line}]({short})")
+                results.append(f"✅ [{escape_md(line)}]({escape_md(short)})")
                 success.append((line, short))
             else:
-                results.append(f"⚠️ `{line}` — ошибка при сокращении")
+                results.append(f"⚠️ `{escape_md(line)}` — ошибка при сокращении")
         else:
-            results.append(f"❌ `{line}` — невалидная ссылка")
+            results.append(f"❌ `{escape_md(line)}` — невалидная ссылка")
 
     summary = f"📊 Сокращено: {len(success)}/{len(lines)}\n\n"
     await send_long_message(message, summary + "\n".join(results))
