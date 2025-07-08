@@ -1,13 +1,7 @@
-import os
-from dotenv import load_dotenv
+from os import environ
 
-load_dotenv()
-
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-VK_TOKEN = os.getenv("VK_TOKEN")
-
-# Настройки
-MAX_LINKS_PER_BATCH = 50
+BOT_TOKEN = environ.get("BOT_TOKEN")
+VK_TOKEN = environ.get("VK_TOKEN")
 
 if not BOT_TOKEN or not VK_TOKEN:
-    raise ValueError("BOT_TOKEN или VK_TOKEN не найдены в .env")
+    raise ValueError("Необходимо указать BOT_TOKEN и VK_TOKEN в переменных окружения.")
