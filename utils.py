@@ -8,6 +8,12 @@ url_pattern = re.compile(r"https?://[^\s]+")
 def is_valid_url(text: str) -> bool:
     return bool(url_pattern.match(text))
 
+def escape_md(text: str) -> str:
+    special_chars = r'_*[]()~`>#+-=|{}.!'
+    for ch in special_chars:
+        text = text.replace(ch, '\\' + ch)
+    return text
+
 async def shorten_vk_link(link: str) -> str | None:
     url = "https://vk.cc/shorten"
     headers = {"Authorization": f"Bearer {VK_TOKEN}"}
