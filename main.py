@@ -1,68 +1,73 @@
-import os
-import re
-import asyncio
 import logging
-from dotenv import load_dotenv
+import os
+import json
+import aiohttp
+import asyncio
+import re
 from aiogram import Bot, Dispatcher, types, F
+from aiogram.types import Message
 from aiogram.enums.parse_mode import ParseMode
-from aiogram.types import Message, KeyboardButton, ReplyKeyboardMarkup
-from utils import shorten_vk_link, send_long_message
+from aiogram.filters import CommandStart, Command
+from aiogram.utils.markdown import escape_md
+from asyncio import Semaphore
+from dotenv import load_dotenv
 
-# Загрузка токенов из .env
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+VK_TOKEN = os.getenv("VK_TOKEN")
 
-# Проверка токена
-if not BOT_TOKEN:
-    logging.error("❌ BOT_TOKEN не найден в .env")
+if not BOT_TOKEN or not VK_TOKEN:
+    logging.error("BOT_TOKEN or VK_TOKEN not found in .env file")
     exit(1)
 
 # Настройки
 MAX_BULK_LINKS = 50
-url_pattern = re.compile(r"https?://[^\s]+")
+HEADERS = {"Authorization": f"Bearer {VK_TOKEN}"}
 
-# Логирование
-logging.basicConfig(level=logging.INFO)
-
-# Инициализация бота
 bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.MARKDOWN_V2)
 dp = Dispatcher()
+logging.basicConfig(level=logging.INFO)
 
-# Главное меню
-main_menu = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="Сократить ссылку")],
-        [KeyboardButton(text="Статистика")]
-    ],
-    resize_keyboard=True,
-    input_field_placeholder="Выбери действие"
-)
+# Валидация URL
+url_pattern = re.compile(r"https?://[^\s]+")
 
-# Команда /start
-@dp.message(F.text == "/start")
+# Отправка длинных сообщений
+async def send_long_message(message: Message, text: str, max_length=4096):
+    if len(text) <= max_length:
+        await message.answer(text, disable_web_page_preview=True)
+        return
+    parts = [text[i:i + max_length] for i in range(0, len(text), max_length)]
+    for part in parts:
+        await message.answer(part, disable_web_page_preview=True)
+
+# Сокращение одной ссылки
+async def shorten_url(session, url, semaphore):
+    async with semaphore:
+        try:
+            async with session.get("https://vk.cc/shorten", params={"url": url}, headers=HEADERS) as r:
+                if r.status == 200:
+                    data = await r.json()
+                    short_url = data.get("short_url")
+                    if short_url:
+                        return f"✅ [{escape_md(url)}]({escape_md(short_url)})"
+                    else:
+                        return f"⚠️ `{escape_md(url)}` — ошибка при сокращении"
+                return f"⚠️ `{escape_md(url)}` — не удалось сократить (статус: {r.status})"
+        except aiohttp.ClientError as e:
+            return f"⚠️ `{escape_md(url)}` — ошибка сети: {str(e)}"
+
+@dp.message(CommandStart())
 async def cmd_start(message: Message):
-    await message.answer(
-        "👋 Привет! Я умею сокращать ссылки через VK.cc\n\n"
-        "Отправь одну или сразу несколько ссылок (каждая с новой строки).\n"
-        "Максимум — 50 за раз.",
-        reply_markup=main_menu
-    )
+    await message.answer("🔗 Привет! Отправь ссылку или сразу несколько (до 50), и я их сокращу.\n\nЧтобы начать заново, набери /start")
 
-# Команда /help
-@dp.message(F.text == "/help")
+@dp.message(Command("help"))
 async def cmd_help(message: Message):
-    await message.answer(
-        "🛠 Отправь одну или несколько ссылок (до 50 штук), и я их сокращу через VK.cc.\n"
-        "После каждой ссылки жми Enter.\n\n"
-        "Пример:\nhttps://site.ru\nhttps://example.com"
-    )
+    await message.answer("Отправь ссылку или сразу несколько (каждая с новой строки).\n\nЯ сокращу и верну статистику!")
 
-# Обработка текста-ссылок
 @dp.message(F.text)
 async def handle_links(message: Message):
     raw_text = message.text.strip()
     lines = list(filter(None, raw_text.splitlines()))
-
     if not lines:
         await message.answer("⚠️ Не вижу ссылок. Попробуй ещё раз.")
         return
@@ -71,25 +76,15 @@ async def handle_links(message: Message):
         await message.answer(f"⚠️ Можно отправить не больше {MAX_BULK_LINKS} ссылок за раз.")
         return
 
-    result = []
-    for line in lines:
-        if not url_pattern.match(line):
-            result.append(f"❌ `{line}` — не ссылка")
-            continue
+    semaphore = Semaphore(5)
+    async with aiohttp.ClientSession() as session:
+        tasks = [shorten_url(session, line, semaphore) for line in lines if url_pattern.match(line)]
+        result = await asyncio.gather(*tasks)
+        result.extend([f"❌ `{escape_md(line)}` — не ссылка" for line in lines if not url_pattern.match(line)])
 
-        short = await shorten_vk_link(line)
-        if short:
-            result.append(f"✅ [{line}]({short})")
-        else:
-            result.append(f"⚠️ `{line}` — ошибка при сокращении")
-
-    # Кол-во успехов
     success_count = sum(1 for r in result if r.startswith("✅"))
+    await send_long_message(message, f"📊 Сокращено: {success_count}/{len(lines)}\n\n" + "\n\n".join(result))
 
-    header = f"📊 Сокращено: {success_count}/{len(lines)}\n\n"
-    await send_long_message(message, header + "\n\n".join(result))
-
-# Запуск
 async def main():
     await dp.start_polling(bot)
 
