@@ -1,49 +1,52 @@
-import re
 from aiogram import Router, F
-from aiogram.filters import CommandStart, Command
 from aiogram.types import Message
-
-from utils import is_valid_url, shorten_vk_link, send_long_message
+from aiogram.filters import CommandStart, Command
+from utils import shorten_vk_link, send_long_message, is_valid_url
+from aiogram.utils.markdown import escape_md
 
 router = Router()
 
-MAX_BULK_LINKS = 50
+MAX_LINKS = 50
 
 @router.message(CommandStart())
 async def cmd_start(message: Message):
-    await message.answer("🔗 Привет! Отправь ссылку или сразу несколько (до 50), и я их сокращу.\n\nЧтобы начать заново, набери /start")
+    await message.answer(
+        "👋 Привет! Отправь одну или сразу несколько ссылок (по одной на строку) — я сокращу их через vk.cc"
+    )
 
 @router.message(Command("help"))
 async def cmd_help(message: Message):
-    await message.answer("Отправь ссылку или сразу несколько (каждая с новой строки).\n\nЯ сокращу и верну статистику!")
+    await message.answer(
+        "📌 Просто отправь ссылки (до 50 штук за раз).\n"
+        "Я сокращу их и верну результат."
+    )
 
 @router.message(F.text)
 async def handle_links(message: Message):
-    raw_text = message.text.strip()
-    lines = list(filter(None, raw_text.splitlines()))
+    raw = message.text.strip()
+    lines = list(filter(None, raw.splitlines()))
 
     if not lines:
         await message.answer("⚠️ Не вижу ссылок. Попробуй ещё раз.")
         return
 
-    if len(lines) > MAX_BULK_LINKS:
-        await message.answer(f"⚠️ Можно отправить не больше {MAX_BULK_LINKS} ссылок за раз.")
+    if len(lines) > MAX_LINKS:
+        await message.answer(f"⚠️ Можно сократить не больше {MAX_LINKS} ссылок за раз.")
         return
 
     result = []
-    success = 0
+    success_count = 0
 
     for line in lines:
-        if not is_valid_url(line):
-            result.append(f"❌ `{line}` — не ссылка")
-            continue
-
-        short = await shorten_vk_link(line)
-        if short:
-            success += 1
-            result.append(f"✅ [{line}]({short})")
+        if is_valid_url(line):
+            short = await shorten_vk_link(line)
+            if short:
+                result.append(f"✅ [{escape_md(line)}]({escape_md(short)})")
+                success_count += 1
+            else:
+                result.append(f"⚠️ `{escape_md(line)}` — ошибка при сокращении")
         else:
-            result.append(f"⚠️ `{line}` — ошибка при сокращении")
+            result.append(f"❌ `{escape_md(line)}` — невалидная ссылка")
 
-    summary = f"📊 Сокращено: {success}/{len(lines)}\n\n"
-    await send_long_message(message, summary + "\n\n".join(result))
+    summary = f"📊 Сокращено: {success_count}/{len(lines)}\n\n"
+    await send_long_message(message, summary + "\n".join(result))
